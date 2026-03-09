@@ -8,6 +8,7 @@
 
 ## 📑 Mục Lục
 
+- [🚀 Khởi Động Server](#-khởi-động-server)
 - [Yêu Cầu Chung](#yêu-cầu-chung)
 - [📤 Nộp Bài](#-nộp-bài)
 - [Bài 1: Statistics APIs (20 điểm)](#bài-1-statistics-apis-20-điểm)
@@ -23,6 +24,77 @@
 - [💡 Gợi Ý & Tips](#-gợi-ý--tips)
 - [📚 Tài Liệu Tham Khảo](#-tài-liệu-tham-khảo)
 - [🚀 Bonus Challenges](#-bonus-challenges)
+
+---
+
+## 🚀 Khởi Động Server
+
+Trước khi chạy bất kỳ lệnh `curl` nào, bạn cần khởi động database và server. Thư mục làm việc là `app/session3-database/`.
+
+### Bước 1: Tạo file cấu hình môi trường
+
+```bash
+cd app/session3-database
+cp .env.example .env
+```
+
+### Bước 2: Khởi động PostgreSQL (cần Docker)
+
+```bash
+# Khởi động database
+docker-compose up -d
+
+# Kiểm tra database đã chạy chưa
+docker-compose ps
+```
+
+### Bước 3: Khởi động server
+
+```bash
+# Cài đặt dependencies
+go mod tidy
+
+# Chạy server (giữ terminal này mở)
+go run cmd/server/main.go
+```
+
+Hoặc dùng Makefile cho gọn hơn:
+
+```bash
+# Lần đầu cài đặt (khởi động DB + chờ sẵn sàng)
+make setup
+
+# Chạy server
+make run
+```
+
+### Bước 4: Kiểm tra server đang chạy
+
+Mở **terminal mới** và chạy:
+
+```bash
+curl http://localhost:8080/health
+```
+
+Kết quả mong đợi:
+
+```json
+{ "status": "ok", "timestamp": "..." }
+```
+
+Khi thấy kết quả trên, server đã sẵn sàng — bạn có thể chạy các lệnh `curl` trong từng bài tập.
+
+### Dừng server và database
+
+```bash
+# Dừng server: nhấn Ctrl+C trong terminal đang chạy server
+
+# Dừng database
+docker-compose stop
+
+# Hoặc dọn dẹp toàn bộ (xóa cả volume)
+make clean
+```
 
 ---
 
