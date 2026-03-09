@@ -150,7 +150,124 @@ func (m *MemoryStorage) Search(query string) ([]*model.Asset, error) {
 		return assets[i].CreatedAt.After(assets[j].CreatedAt)
 	})
 
+	// Limit to 100 results
+	if len(assets) > 100 {
+		assets = assets[:100]
+	}
+
 	return assets, nil
+}
+
+// GetStats returns aggregated statistics about all assets
+func (m *MemoryStorage) GetStats() (*model.Stats, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	stats := &model.Stats{
+		Total:    len(m.data),
+		ByType:   make(map[string]int),
+		ByStatus: make(map[string]int),
+	}
+
+	for _, asset := range m.data {
+		stats.ByType[asset.Type]++
+		stats.ByStatus[asset.Status]++
+	}
+
+	return stats, nil
+}
+
+// Count returns the number of assets matching optional filters
+func (m *MemoryStorage) Count(assetType, status string) (int, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	count := 0
+	for _, asset := range m.data {
+		if assetType != "" && asset.Type != assetType {
+			continue
+		}
+		if status != "" && asset.Status != status {
+			continue
+		}
+		count++
+	}
+
+	return count, nil
+}
+
+// BatchCreate creates multiple assets atomically (all-or-nothing)
+func (m *MemoryStorage) BatchCreate(assets []*model.Asset) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Validate all assets first (simulate transaction rollback on failure)
+	for _, asset := range assets {
+		if _, exists := m.data[asset.ID]; exists {
+			return model.ErrDuplicate
+		}
+	}
+
+	// Insert all
+	for _, asset := range assets {
+		m.data[asset.ID] = asset
+	}
+
+	return nil
+}
+
+// BatchDelete removes assets by IDs; IDs not found are silently skipped.
+// Returns the count of deleted and not-found assets.
+func (m *MemoryStorage) BatchDelete(ids []string) (deleted int, notFound int, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, id := range ids {
+		if _, exists := m.data[id]; exists {
+			delete(m.data, id)
+			deleted++
+		} else {
+			notFound++
+		}
+	}
+
+	return deleted, notFound, nil
+}
+
+// ListPaginated retrieves a page of assets with optional type/status filters.
+// Returns the matching assets, the total matching count, and any error.
+func (m *MemoryStorage) ListPaginated(page, limit int, assetType, status string) ([]*model.Asset, int, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var filtered []*model.Asset
+	for _, asset := range m.data {
+		if assetType != "" && asset.Type != assetType {
+			continue
+		}
+		if status != "" && asset.Status != status {
+			continue
+		}
+		filtered = append(filtered, asset)
+	}
+
+	// Sort newest first
+	sort.Slice(filtered, func(i, j int) bool {
+		return filtered[i].CreatedAt.After(filtered[j].CreatedAt)
+	})
+
+	total := len(filtered)
+	offset := (page - 1) * limit
+	if offset >= total {
+		return []*model.Asset{}, total, nil
+	}
+
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+
+	return filtered[offset:end], total, nil
 }
 
 /*

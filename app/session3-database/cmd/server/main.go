@@ -1,12 +1,13 @@
 package main
 
 import (
-	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
+	"mini-asm/internal/database"
 	"mini-asm/internal/handler"
 	"mini-asm/internal/service"
 	"mini-asm/internal/storage/postgres"
@@ -38,49 +39,32 @@ func main() {
 	log.Printf("📊 Connecting to database: %s@%s:%s/%s", dbUser, dbHost, dbPort, dbName)
 
 	// ============================================
-	// DATABASE CONNECTION
+	// DATABASE CONNECTION WITH RETRY
 	// ============================================
 
-	// Open database connection
-	db, err := sql.Open("postgres", connStr)
+	db, err := database.ConnectWithRetry(connStr, 5)
 	if err != nil {
-		log.Fatal("❌ Failed to open database:", err)
+		log.Fatal("❌ Failed to connect to database:", err)
 	}
 	defer db.Close()
 
-	// Verify connection with ping
-	if err := db.Ping(); err != nil {
-		log.Fatal("❌ Failed to ping database:", err)
-	}
-
-	log.Println("✅ Database connected successfully")
-
 	// Optional: Configure connection pool
-	db.SetMaxOpenConns(25)               // Maximum open connections
-	db.SetMaxIdleConns(5)                // Maximum idle connections
-	db.SetConnMaxLifetime(5 * 60 * 1000) // Connection lifetime (5 minutes)
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(5 * time.Minute)
 
 	// ============================================
 	// DEPENDENCY INJECTION - Wire up all layers
 	// ============================================
 
-	// 1. Initialize Storage Layer (Infrastructure)
-	//    🎯 KEY CHANGE: PostgresStorage instead of MemoryStorage!
-	//    Compare with Session 2:
-	//    Session 2: store := memory.NewMemoryStorage()
-	//    Session 3: store := postgres.NewPostgresStorage(db)
 	store := postgres.NewPostgresStorage(db)
 	log.Println("✅ Storage initialized: PostgreSQL")
 
-	// 2. Initialize Service Layer (Use Case / Business Logic)
-	//    ✨ NO CHANGES! Service doesn't care about storage implementation
 	assetService := service.NewAssetService(store)
 	log.Println("✅ Service initialized: AssetService")
 
-	// 3. Initialize Handler Layer (Presentation / HTTP)
-	//    ✨ NO CHANGES! Handler doesn't care about storage implementation
 	assetHandler := handler.NewAssetHandler(assetService)
-	healthHandler := handler.NewHealthHandler()
+	healthHandler := handler.NewHealthHandler(db)
 	log.Println("✅ Handlers initialized")
 
 	// ============================================
@@ -92,15 +76,29 @@ func main() {
 	// Health check
 	mux.HandleFunc("GET /health", healthHandler.Check)
 
+	// Statistics (registered before /assets/{id} to avoid ambiguity)
+	mux.HandleFunc("GET /assets/stats", assetHandler.GetStats)
+	mux.HandleFunc("GET /assets/count", assetHandler.CountAssets)
+	mux.HandleFunc("GET /assets/search", assetHandler.SearchAssets)
+
+	// Batch operations
+	mux.HandleFunc("POST /assets/batch", assetHandler.BatchCreate)
+	mux.HandleFunc("DELETE /assets/batch", assetHandler.BatchDelete)
+
 	// Asset CRUD operations
-	mux.HandleFunc("POST /assets", assetHandler.CreateAsset)        // Create
-	mux.HandleFunc("GET /assets", assetHandler.ListAssets)          // Read (list with filters)
-	mux.HandleFunc("GET /assets/{id}", assetHandler.GetAsset)       // Read (single)
-	mux.HandleFunc("PUT /assets/{id}", assetHandler.UpdateAsset)    // Update
-	mux.HandleFunc("DELETE /assets/{id}", assetHandler.DeleteAsset) // Delete
+	mux.HandleFunc("POST /assets", assetHandler.CreateAsset)
+	mux.HandleFunc("GET /assets", assetHandler.ListAssets)
+	mux.HandleFunc("GET /assets/{id}", assetHandler.GetAsset)
+	mux.HandleFunc("PUT /assets/{id}", assetHandler.UpdateAsset)
+	mux.HandleFunc("DELETE /assets/{id}", assetHandler.DeleteAsset)
 
 	log.Println("✅ Routes registered:")
 	log.Println("   GET    /health")
+	log.Println("   GET    /assets/stats")
+	log.Println("   GET    /assets/count")
+	log.Println("   GET    /assets/search")
+	log.Println("   POST   /assets/batch")
+	log.Println("   DELETE /assets/batch")
 	log.Println("   POST   /assets")
 	log.Println("   GET    /assets")
 	log.Println("   GET    /assets/{id}")

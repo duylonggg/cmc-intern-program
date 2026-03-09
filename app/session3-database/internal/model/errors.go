@@ -22,6 +22,9 @@ var (
 
 	// ErrInvalidStatus indicates invalid asset status
 	ErrInvalidStatus = errors.New("invalid status: must be active or inactive")
+
+	// ErrTooManyAssets indicates a batch operation exceeds the allowed limit
+	ErrTooManyAssets = errors.New("too many assets: maximum 100 per request")
 )
 
 /*

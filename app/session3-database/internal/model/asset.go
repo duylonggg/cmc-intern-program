@@ -13,6 +13,27 @@ type Asset struct {
 	UpdatedAt time.Time `json:"updated_at"` // Auto-updated
 }
 
+// Stats represents aggregated statistics about assets
+type Stats struct {
+	Total    int            `json:"total"`
+	ByType   map[string]int `json:"by_type"`
+	ByStatus map[string]int `json:"by_status"`
+}
+
+// PagedResult wraps a paginated list of assets with pagination metadata
+type PagedResult struct {
+	Data       []*Asset   `json:"data"`
+	Pagination Pagination `json:"pagination"`
+}
+
+// Pagination holds paging metadata
+type Pagination struct {
+	Page       int `json:"page"`
+	Limit      int `json:"limit"`
+	Total      int `json:"total"`
+	TotalPages int `json:"total_pages"`
+}
+
 // Asset types - using constants for type safety
 const (
 	TypeDomain  = "domain"

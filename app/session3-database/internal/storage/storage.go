@@ -35,6 +35,23 @@ type Storage interface {
 
 	// Search finds assets by partial name match
 	Search(query string) ([]*model.Asset, error)
+
+	// GetStats returns aggregated statistics about all assets
+	GetStats() (*model.Stats, error)
+
+	// Count returns the number of assets matching optional filters
+	Count(assetType, status string) (int, error)
+
+	// BatchCreate creates multiple assets atomically (all-or-nothing)
+	BatchCreate(assets []*model.Asset) error
+
+	// BatchDelete removes assets by IDs; IDs not found are skipped
+	// Returns the number of assets deleted and the number not found
+	BatchDelete(ids []string) (deleted int, notFound int, err error)
+
+	// ListPaginated retrieves a page of assets with optional type/status filters
+	// Returns the matching assets, total matching count, and any error
+	ListPaginated(page, limit int, assetType, status string) ([]*model.Asset, int, error)
 }
 
 /*
