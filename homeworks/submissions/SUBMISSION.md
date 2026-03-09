@@ -1,6 +1,6 @@
 # Homework Submission
 
-**Họ tên:** GitHub Copilot
+**Họ tên:** Hà Duy Long
 
 ## Các bài đã hoàn thành
 
