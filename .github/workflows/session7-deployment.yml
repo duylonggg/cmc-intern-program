@@ -184,9 +184,10 @@ jobs:
 
       - name: Test backend API - Create asset
         run: |
+          # Use field names expected by backend (name, type, status)
           response=$(curl -s -w "\n%{http_code}" -X POST http://localhost:8080/assets \
             -H "Content-Type: application/json" \
-            -d '{"domain":"test.com","type":"domain","criticality":"high"}')
+            -d '{"name":"test.com","type":"domain","status":"active"}')
           status_code=$(echo "$response" | tail -n1)
           if [ "$status_code" -eq 201 ]; then
             echo "✅ Create asset endpoint working"
