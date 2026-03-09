@@ -6,6 +6,8 @@ import (
 	"mini-asm/internal/model"
 	"mini-asm/internal/service"
 	"net/http"
+	"strconv"
+	"strings"
 )
 
 // AssetHandler handles HTTP requests for asset operations
@@ -58,34 +60,57 @@ func (h *AssetHandler) CreateAsset(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListAssets handles GET /assets
+// Supports pagination (?page=&limit=), filtering (?type=&status=), and search (?search=)
 func (h *AssetHandler) ListAssets(w http.ResponseWriter, r *http.Request) {
-	// Get query parameters for filtering/searching
-	assetType := r.URL.Query().Get("type")
-	status := r.URL.Query().Get("status")
-	search := r.URL.Query().Get("search")
+	q := r.URL.Query()
+	assetType := q.Get("type")
+	status := q.Get("status")
+	search := q.Get("search")
+	pageStr := q.Get("page")
+	limitStr := q.Get("limit")
 
+	// If search is requested, return search results directly
+	if search != "" {
+		assets, err := h.service.SearchAssets(search)
+		if err != nil {
+			RespondError(w, mapErrorToStatus(err), err.Error())
+			return
+		}
+		if assets == nil {
+			assets = []*model.Asset{}
+		}
+		RespondJSON(w, http.StatusOK, assets)
+		return
+	}
+
+	// If pagination parameters are provided, use paginated listing
+	if pageStr != "" || limitStr != "" {
+		page, _ := strconv.Atoi(pageStr)
+		limit, _ := strconv.Atoi(limitStr)
+		result, err := h.service.ListAssetsPaginated(page, limit, assetType, status)
+		if err != nil {
+			RespondError(w, mapErrorToStatus(err), err.Error())
+			return
+		}
+		RespondJSON(w, http.StatusOK, result)
+		return
+	}
+
+	// Otherwise use filter or get all
 	var assets []*model.Asset
 	var err error
 
-	// Determine which operation to perform
-	if search != "" {
-		// Search by name
-		assets, err = h.service.SearchAssets(search)
-	} else if assetType != "" || status != "" {
-		// Filter by type and/or status
+	if assetType != "" || status != "" {
 		assets, err = h.service.FilterAssets(assetType, status)
 	} else {
-		// Get all assets
 		assets, err = h.service.GetAllAssets()
 	}
 
 	if err != nil {
-		statusCode := mapErrorToStatus(err)
-		RespondError(w, statusCode, err.Error())
+		RespondError(w, mapErrorToStatus(err), err.Error())
 		return
 	}
 
-	// Return empty array instead of null if no assets
 	if assets == nil {
 		assets = []*model.Asset{}
 	}
@@ -160,6 +185,123 @@ func (h *AssetHandler) DeleteAsset(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// GetStats handles GET /assets/stats
+func (h *AssetHandler) GetStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.service.GetStats()
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	RespondJSON(w, http.StatusOK, stats)
+}
+
+// CountAssets handles GET /assets/count
+func (h *AssetHandler) CountAssets(w http.ResponseWriter, r *http.Request) {
+	assetType := r.URL.Query().Get("type")
+	status := r.URL.Query().Get("status")
+
+	count, err := h.service.CountAssets(assetType, status)
+	if err != nil {
+		RespondError(w, mapErrorToStatus(err), err.Error())
+		return
+	}
+
+	filters := map[string]string{}
+	if assetType != "" {
+		filters["type"] = assetType
+	}
+	if status != "" {
+		filters["status"] = status
+	}
+
+	RespondJSON(w, http.StatusOK, map[string]interface{}{
+		"count":   count,
+		"filters": filters,
+	})
+}
+
+// BatchCreateRequest is the request body for POST /assets/batch
+type BatchCreateRequest struct {
+	Assets []struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+	} `json:"assets"`
+}
+
+// BatchCreate handles POST /assets/batch
+func (h *AssetHandler) BatchCreate(w http.ResponseWriter, r *http.Request) {
+	var req BatchCreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		RespondError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	inputs := make([]service.CreateAssetInput, len(req.Assets))
+	for i, a := range req.Assets {
+		inputs[i] = service.CreateAssetInput{Name: a.Name, Type: a.Type}
+	}
+
+	assets, err := h.service.BatchCreateAssets(inputs)
+	if err != nil {
+		RespondError(w, mapErrorToStatus(err), err.Error())
+		return
+	}
+
+	ids := make([]string, len(assets))
+	for i, a := range assets {
+		ids[i] = a.ID
+	}
+
+	RespondJSON(w, http.StatusCreated, map[string]interface{}{
+		"created": len(assets),
+		"ids":     ids,
+	})
+}
+
+// BatchDelete handles DELETE /assets/batch?ids=uuid1,uuid2,...
+func (h *AssetHandler) BatchDelete(w http.ResponseWriter, r *http.Request) {
+	idsParam := r.URL.Query().Get("ids")
+	if idsParam == "" {
+		RespondError(w, http.StatusBadRequest, "ids query parameter is required")
+		return
+	}
+
+	ids := strings.Split(idsParam, ",")
+
+	deleted, notFound, err := h.service.BatchDeleteAssets(ids)
+	if err != nil {
+		RespondError(w, mapErrorToStatus(err), err.Error())
+		return
+	}
+
+	RespondJSON(w, http.StatusOK, map[string]interface{}{
+		"deleted":   deleted,
+		"not_found": notFound,
+	})
+}
+
+// SearchAssets handles GET /assets/search?q=...
+func (h *AssetHandler) SearchAssets(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		RespondError(w, http.StatusBadRequest, "q query parameter is required")
+		return
+	}
+
+	assets, err := h.service.SearchAssets(q)
+	if err != nil {
+		RespondError(w, mapErrorToStatus(err), err.Error())
+		return
+	}
+
+	if assets == nil {
+		assets = []*model.Asset{}
+	}
+
+	RespondJSON(w, http.StatusOK, assets)
+}
+
 // mapErrorToStatus maps service layer errors to HTTP status codes
 func mapErrorToStatus(err error) int {
 	switch {
@@ -168,7 +310,8 @@ func mapErrorToStatus(err error) int {
 	case errors.Is(err, model.ErrInvalidInput),
 		errors.Is(err, model.ErrEmptyName),
 		errors.Is(err, model.ErrInvalidType),
-		errors.Is(err, model.ErrInvalidStatus):
+		errors.Is(err, model.ErrInvalidStatus),
+		errors.Is(err, model.ErrTooManyAssets):
 		return http.StatusBadRequest
 	case errors.Is(err, model.ErrDuplicate):
 		return http.StatusConflict
