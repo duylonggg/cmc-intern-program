@@ -21,16 +21,14 @@
 **`GET /assets/stats`** – trả về thống kê tổng quan:
 ```bash
 curl http://localhost:8080/assets/stats
-# Response:
-# {"total":3,"by_type":{"domain":2,"ip":1},"by_status":{"active":3}}
 ```
+![alt text](image-1.png)
 
 **`GET /assets/count`** – đếm có filter tùy chọn:
 ```bash
 curl "http://localhost:8080/assets/count?type=domain&status=active"
-# Response:
-# {"count":2,"filters":{"status":"active","type":"domain"}}
 ```
+![alt text](image-2.png)
 
 **Files thay đổi:**
 - `internal/model/asset.go` – thêm struct `Stats`, `PagedResult`, `Pagination`
@@ -47,19 +45,21 @@ curl "http://localhost:8080/assets/count?type=domain&status=active"
 
 **`POST /assets/batch`** – tạo nhiều assets trong 1 transaction:
 ```bash
-curl -X POST http://localhost:8080/assets/batch \
-  -H "Content-Type: application/json" \
-  -d '{"assets":[{"name":"test1.com","type":"domain"},{"name":"test2.com","type":"domain"}]}'
-# Response 201:
-# {"created":2,"ids":["<uuid1>","<uuid2>"]}
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:8080/assets/batch" `
+  -ContentType "application/json" `
+  -Body '{"assets":[{"name":"test1.com","type":"domain"},{"name":"test2.com","type":"domain"}]}'
+```
+![alt text](image-3.png)
 
-# Invalid type → 400, nothing created
+Invalid type → 400, nothing created
+```
 curl -X POST http://localhost:8080/assets/batch \
   -H "Content-Type: application/json" \
   -d '{"assets":[{"name":"ok.com","type":"domain"},{"name":"bad","type":"invalid_type"}]}'
-# Response 400:
-# {"error":"invalid asset type: must be domain, ip, or service"}
 ```
+![alt text](image-4.png)
 
 **Kỹ thuật:**
 - Validate tất cả assets trước khi insert
@@ -80,10 +80,11 @@ curl -X POST http://localhost:8080/assets/batch \
 
 **`DELETE /assets/batch?ids=uuid1,uuid2,...`** – xóa nhiều assets:
 ```bash
-curl -X DELETE "http://localhost:8080/assets/batch?ids=$ID1,$ID2,fake-uuid-123"
-# Response 200:
-# {"deleted":2,"not_found":1}
+Invoke-RestMethod `
+  -Method DELETE `
+  -Uri "http://localhost:8080/assets/batch?ids=ec4be4a0-9086-4161-85cf-f3bbda8c54be,14751d58-ffaf-4b4d-8974-c5c78dd6c1fa"
 ```
+![alt text](image-5.png)
 
 **Behavior:**
 - Xóa tất cả IDs hợp lệ
@@ -112,6 +113,7 @@ Hàm `ConnectWithRetry(dsn string, maxRetries int) (*sql.DB, error)` với expon
 🔄 Database connection attempt 3/5...
 ✅ Database connected successfully!
 ```
+![alt text](image-6.png)
 
 Backoff: `time.Duration(1<<uint(attempt-1)) * time.Second` → 1s, 2s, 4s, 8s, 16s
 
@@ -126,22 +128,8 @@ Backoff: `time.Duration(1<<uint(attempt-1)) * time.Second` → 1s, 2s, 4s, 8s, 1
 **`GET /health`** – trả về DB connection pool info:
 ```bash
 curl http://localhost:8080/health
-# Response 200 (DB connected):
-# {
-#   "status": "ok",
-#   "database": {
-#     "status": "connected",
-#     "open_connections": 1,
-#     "in_use": 0,
-#     "idle": 1,
-#     "max_open": 25
-#   },
-#   "timestamp": "2026-03-09T10:00:00Z"
-# }
-
-# Response 503 (DB disconnected):
-# {"status":"degraded","database":{"status":"disconnected",...},...}
 ```
+![alt text](image-7.png)
 
 **Files thay đổi:**
 - `internal/handler/health_handler.go` – `NewHealthHandler(*sql.DB)`, dùng `db.Ping()` và `db.Stats()`
@@ -154,12 +142,8 @@ curl http://localhost:8080/health
 **`GET /assets?page=1&limit=10&type=domain&status=active`**:
 ```bash
 curl "http://localhost:8080/assets?page=1&limit=2&type=domain"
-# Response:
-# {
-#   "data": [...],
-#   "pagination": {"page":1,"limit":2,"total":5,"total_pages":3}
-# }
 ```
+![alt text](image-8.png)
 
 **Files thay đổi:**
 - `internal/storage/storage.go` – thêm `ListPaginated()`
@@ -175,8 +159,8 @@ curl "http://localhost:8080/assets?page=1&limit=2&type=domain"
 **`GET /assets/search?q=example`** – tìm kiếm partial, case-insensitive:
 ```bash
 curl "http://localhost:8080/assets/search?q=.com"
-# Response: array of matching assets (max 100)
 ```
+![alt text](image-9.png)
 
 **Files thay đổi:**
 - `internal/handler/asset_handler.go` – thêm `SearchAssets()` handler
