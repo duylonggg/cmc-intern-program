@@ -19,7 +19,7 @@ func TestValidateName(t *testing.T) {
 		{
 			name:    "valid name",
 			input:   "example.com",
-			wantErr: true,
+			wantErr: false,
 		},
 		{
 			name:    "empty name",
