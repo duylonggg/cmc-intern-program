@@ -16,14 +16,16 @@ COPY . .
 # Build the application
 RUN npm run build
 
-# Production stage
+# Production stage - Use nginx for static files + API proxy
 FROM nginx:alpine
 
-# Copy custom nginx config
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+WORKDIR /app
 
 # Copy built assets from builder
 COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Copy nginx config for API proxy
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Expose port
 EXPOSE 80

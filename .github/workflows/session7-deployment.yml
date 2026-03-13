@@ -1,0 +1,279 @@
+name: Session 7 - Build and Test
+
+on:
+  pull_request:
+    branches:
+      - day3
+      - main
+    paths:
+      - "app/session7-deployment/backend/**"
+      - ".github/workflows/session7-deployment.yml"
+  push:
+    branches:
+      - day3
+      - main
+    paths:
+      - "app/session7-deployment/backend/**"
+      - ".github/workflows/session7-deployment.yml"
+
+jobs:
+  # Backend Build and Test
+  backend:
+    name: Backend - Build & Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app/session7-deployment/backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: app/session7-deployment/backend/go.sum
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Build backend
+        run: go build -v -o main ./cmd/server
+
+      - name: Run tests
+        run: go test -v ./...
+
+      - name: Run tests with coverage
+        run: go test -v -coverprofile=coverage.out ./...
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./app/session7-deployment/backend/coverage.out
+          flags: backend
+        continue-on-error: true
+
+  # Frontend Build and Test
+  frontend:
+    name: Frontend - Build & Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app/session7-deployment/frontend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: app/session7-deployment/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Check build output
+        run: |
+          if [ ! -d "dist" ]; then
+            echo "Build failed - dist directory not found"
+            exit 1
+          fi
+          echo "Build successful - dist directory exists"
+
+  # Docker Build Test
+  docker-build:
+    name: Docker - Build Images
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./app/session7-deployment/backend
+          file: ./app/session7-deployment/backend/Dockerfile
+          push: false
+          tags: mini-asm-backend:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build frontend Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./app/session7-deployment/frontend
+          file: ./app/session7-deployment/frontend/Dockerfile
+          push: false
+          tags: mini-asm-frontend:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Integration Test with Docker Compose
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [docker-build]
+    defaults:
+      run:
+        working-directory: app/session7-deployment
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create .env file for backend
+        run: |
+          mkdir -p backend
+          cat > backend/.env << EOF
+          DB_HOST=db
+          DB_PORT=5432
+          DB_USER=postgres
+          DB_PASSWORD=postgres
+          DB_NAME=mini_asm
+          EOF
+
+      - name: Start services
+        run: docker compose up -d
+
+      - name: Wait for services to be healthy
+        run: |
+          echo "Waiting for database..."
+          timeout 60 bash -c 'until docker compose exec -T db pg_isready -U postgres; do sleep 2; done'
+
+          echo "Waiting for backend..."
+          timeout 60 bash -c 'until curl -f http://localhost:8080/health; do sleep 2; done'
+
+          echo "Waiting for frontend..."
+          timeout 60 bash -c 'until curl -f http://localhost:3000; do sleep 2; done'
+
+      - name: Test backend health endpoint
+        run: |
+          response=$(curl -s http://localhost:8080/health)
+          echo "Health check response: $response"
+          # Accept health JSON like {"status":"ok","message":"..."}
+          # and common messages such as "running" or "Mini ASM"
+          if echo "$response" | grep -Eqi '"status"[[:space:]]*:[[:space:]]*"ok"|running|mini asm|healthy|connected'; then
+            echo "✅ Backend health check passed"
+          else
+            echo "❌ Backend health check failed"
+            exit 1
+          fi
+
+      - name: Test backend API - List assets
+        run: |
+          response=$(curl -s -w "\n%{http_code}" http://localhost:8080/assets)
+          status_code=$(echo "$response" | tail -n1)
+          if [ "$status_code" -eq 200 ]; then
+            echo "✅ List assets endpoint working"
+          else
+            echo "❌ List assets endpoint failed with status: $status_code"
+            exit 1
+          fi
+
+      - name: Test backend API - Create asset
+        run: |
+          # Use field names expected by backend (name, type, status)
+          response=$(curl -s -w "\n%{http_code}" -X POST http://localhost:8080/assets \
+            -H "Content-Type: application/json" \
+            -d '{"name":"test.com","type":"domain","status":"active"}')
+          status_code=$(echo "$response" | tail -n1)
+          if [ "$status_code" -eq 201 ]; then
+            echo "✅ Create asset endpoint working"
+          else
+            echo "❌ Create asset endpoint failed with status: $status_code"
+            exit 1
+          fi
+
+      - name: Test frontend accessibility
+        run: |
+          status_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000)
+          if [ "$status_code" -eq 200 ]; then
+            echo "✅ Frontend is accessible"
+          else
+            echo "❌ Frontend not accessible, status: $status_code"
+            exit 1
+          fi
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          echo "=== Backend Logs ==="
+          docker compose logs backend
+          echo ""
+          echo "=== Frontend Logs ==="
+          docker compose logs frontend
+          echo ""
+          echo "=== Database Logs ==="
+          docker compose logs db
+
+      - name: Stop services
+        if: always()
+        run: docker compose down -v
+
+  # Security Scanning
+  # security-scan:
+  #   name: Security Scan
+  #   runs-on: ubuntu-latest
+  #   needs: [backend, frontend]
+
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+
+  #     - name: Run Trivy vulnerability scanner (Backend)
+  #       uses: aquasecurity/trivy-action@master
+  #       with:
+  #         scan-type: "fs"
+  #         scan-ref: "app/session7-deployment/backend"
+  #         severity: "CRITICAL,HIGH"
+  #         exit-code: "0"
+  #       continue-on-error: true
+
+  #     - name: Run Trivy vulnerability scanner (Frontend)
+  #       uses: aquasecurity/trivy-action@master
+  #       with:
+  #         scan-type: "fs"
+  #         scan-ref: "app/session7-deployment/frontend"
+  #         severity: "CRITICAL,HIGH"
+  #         exit-code: "0"
+  #       continue-on-error: true
+
+  # Summary Report
+  # report:
+  #   name: Build Report
+  #   runs-on: ubuntu-latest
+  #   needs: [backend, frontend, docker-build, integration-test]
+  #   if: always()
+
+  #   steps:
+  #     - name: Generate summary
+  #       run: |
+  #         echo "# Session 7 Deployment - Build Summary" >> $GITHUB_STEP_SUMMARY
+  #         echo "" >> $GITHUB_STEP_SUMMARY
+  #         echo "## Build Status" >> $GITHUB_STEP_SUMMARY
+  #         echo "- Backend: ${{ needs.backend.result }}" >> $GITHUB_STEP_SUMMARY
+  #         echo "- Frontend: ${{ needs.frontend.result }}" >> $GITHUB_STEP_SUMMARY
+  #         echo "- Docker Build: ${{ needs.docker-build.result }}" >> $GITHUB_STEP_SUMMARY
+  #         echo "- Integration Tests: ${{ needs.integration-test.result }}" >> $GITHUB_STEP_SUMMARY
+  #         echo "" >> $GITHUB_STEP_SUMMARY
+
+  #         if [[ "${{ needs.backend.result }}" == "success" ]] && \
+  #            [[ "${{ needs.frontend.result }}" == "success" ]] && \
+  #            [[ "${{ needs.docker-build.result }}" == "success" ]] && \
+  #            [[ "${{ needs.integration-test.result }}" == "success" ]]; then
+  #           echo "✅ All checks passed! Ready to merge." >> $GITHUB_STEP_SUMMARY
+  #         else
+  #           echo "❌ Some checks failed. Please review the logs." >> $GITHUB_STEP_SUMMARY
+  #         fi
