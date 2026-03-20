@@ -18,10 +18,6 @@
 
 https://github.com/duylonggg/cmc-intern-program
 
-## Link Demo (nếu có)
-
-Chưa có public demo URL.
-
 ---
 
 ## Bằng chứng theo từng bài
