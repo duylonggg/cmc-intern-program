@@ -2,7 +2,6 @@
 
 ## Overview
 
-**Duration:** 3-4 hours  
 **Prerequisites:** Sessions 1-4 (Foundation, Basic API, Database, Advanced Features)
 
 This session introduces **External Attack Surface Management** concepts by implementing automated scanning capabilities. Students will learn how to discover and monitor external-facing assets (domains, subdomains, DNS records, WHOIS information) through programmatic scanning.
@@ -26,9 +25,8 @@ This session introduces **External Attack Surface Management** concepts by imple
 4. [Architecture Overview](#architecture-overview)
 5. [Implemented Scanners](#implemented-scanners)
 6. [API Endpoints Reference](#api-endpoints-reference)
-7. [Teaching Flow](#teaching-flow)
-8. [Student Exercises](#student-exercises)
-9. [Troubleshooting](#troubleshooting)
+7. [Student Exercises](#student-exercises)
+8. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -74,6 +72,128 @@ Domain (example.com)
                        │
                        └─► Recursive scanning of each subdomain
 ```
+
+---
+
+## 🔐 Passive vs Active Scanning
+
+**CRITICAL CONCEPT:** In EASM and security testing, scans are categorized as either **passive** or **active**. Understanding this difference is essential for legal, ethical, and practical reasons.
+
+### 🔵 Passive Scanning (Safe, OSINT)
+
+**Definition:** Using publicly available information without directly interacting with target systems.
+
+**Characteristics:**
+
+- ✅ **Legal** - Uses public data sources, no authorization needed
+- ✅ **Stealth** - Target doesn't know you're scanning
+- ✅ **Safe** - Cannot harm target systems
+- ✅ **24/7** - Can run continuously without concerns
+- ✅ **No Detection** - Won't trigger IDS/IPS alerts
+
+**Examples in Session 5:**
+
+| Scan Type                    | Description              | Data Source             |
+| ---------------------------- | ------------------------ | ----------------------- |
+| **WHOIS**                    | Domain registration info | Public WHOIS database   |
+| **DNS**                      | Domain name resolution   | Public DNS servers      |
+| **Subdomain Enum**           | DNS bruteforce/CT logs   | DNS queries, CT logs    |
+| **Certificate Transparency** | Certificate discovery    | Public CT logs (crt.sh) |
+| **ASN Lookup**               | Network ownership        | Public WHOIS/BGP data   |
+
+**When to use:**
+
+- Initial reconnaissance
+- Continuous monitoring
+- Bug bounty discovery phase
+- Threat intelligence gathering
+- Any time you DON'T have explicit permission
+
+**Real-world tools:**
+
+- Censys, Shodan, ZoomEye (search engines)
+- Certificate Transparency (crt.sh)
+- WHOIS databases
+- DNS enumeration tools
+
+---
+
+### 🔴 Active Scanning (⚠️ Requires Permission)
+
+**Definition:** Directly probing target systems with network requests or packets.
+
+**Characteristics:**
+
+- ⚠️ **Legal Risk** - May be illegal without authorization
+- ⚠️ **Detectable** - Target sees your activity in logs/IDS/IPS
+- ⚠️ **Potentially Harmful** - Can crash services or trigger alerts
+- ⚠️ **Requires Approval** - Only run with explicit permission
+- ⚠️ **Logged Evidence** - Your IP will be recorded
+
+**Examples in Session 5 (Student Exercises):**
+
+| Scan Type                   | Risk Level | Why It's Active                             |
+| --------------------------- | ---------- | ------------------------------------------- |
+| **Port Scanning**           | HIGH       | TCP/UDP connection attempts to target ports |
+| **Service Fingerprinting**  | HIGH       | Probing services for versions/banners       |
+| **SSL Certificate Probing** | MEDIUM     | TLS handshakes with target servers          |
+| **Vulnerability Scanning**  | HIGH       | Testing for exploitable weaknesses          |
+
+**Legal Considerations:**
+
+⚖️ **Laws you should know:**
+
+- 🇺🇸 **Computer Fraud and Abuse Act (CFAA)** - Unauthorized access is illegal
+- 🇬🇧 **Computer Misuse Act** - Unauthorized access is illegal
+- 🇪🇺 **NIS Directive** - Security testing regulations
+- 🌍 **Local laws** - Every country has different rules
+
+⚖️ **When active scanning is LEGAL:**
+
+- ✅ You own the assets
+- ✅ Written permission from asset owner
+- ✅ Bug bounty programs (within scope!)
+- ✅ Penetration testing contracts
+- ✅ Authorized security assessments
+
+⚖️ **When active scanning is ILLEGAL:**
+
+- ❌ No permission from owner
+- ❌ Beyond bug bounty scope
+- ❌ "Testing" third-party websites
+- ❌ Scanning your employer without approval
+- ❌ Scanning your ISP/university network
+
+**Real-world example - What could go wrong:**
+
+```
+❌ BAD: "Let me port scan example.com to see what services they run"
+   → Can result in: Legal action, FBI visit, criminal charges
+
+✅ GOOD: "Let me check example.com's DNS records and WHOIS info"
+   → Completely legal, public information
+
+✅ GOOD: "Let me port scan localhost (127.0.0.1) to learn"
+   → Your own machine, totally fine
+
+✅ GOOD: "Client gave written approval to port scan their /24 network"
+   → Authorized, documented, legal
+```
+
+---
+
+### 📋 Session 5 Scan Classification
+
+| Scan Type         | Category      | Session          | Permission Required? |
+| ----------------- | ------------- | ---------------- | -------------------- |
+| WHOIS             | 🔵 Passive    | 5A (Implemented) | ❌ No                |
+| DNS               | 🔵 Passive    | 5A (Implemented) | ❌ No                |
+| Subdomain Enum    | 🔵 Passive    | 5A (Implemented) | ❌ No                |
+| Cert Transparency | 🔵 Passive    | 5B (Exercise)    | ❌ No                |
+| ASN Lookup        | 🔵 Passive    | 5B (Exercise)    | ❌ No                |
+| Port Scanning     | 🔴 **Active** | 5B (Exercise)    | ✅ **YES**           |
+| Service Detection | 🔴 **Active** | 5B (Exercise)    | ✅ **YES**           |
+| SSL Probing       | 🔴 **Active** | 5B (Exercise)    | ✅ **YES**           |
 
 ---
 
@@ -253,7 +373,60 @@ curl -X POST http://localhost:8080/assets/$ASSET_ID/scan \
 curl -X POST http://localhost:8080/assets/$ASSET_ID/scan \
   -H "Content-Type: application/json" \
   -d '{"scan_type": "subdomain"}'
+
+# Run ALL passive scans at once (recommended!)
+curl -X POST http://localhost:8080/assets/$ASSET_ID/scan \
+  -H "Content-Type: application/json" \
+  -d '{"scan_type": "all"}'
+
+# Get combined results for "all" scan
+curl http://localhost:8080/scan-jobs/$JOB_ID/results
+# Response:
+# {
+#   "dns_records": [...],
+#   "whois_records": [...],
+#   "subdomains": [...]
+# }
 ```
+
+### 6. Get ALL results for an asset (NEW! 🆕)
+
+After running scans, you can get all accumulated results for an asset:
+
+```bash
+# Get ALL scan results for an asset (DNS + WHOIS + Subdomains)
+# This returns data from ALL scan jobs, not just one
+curl http://localhost:8080/assets/$ASSET_ID/results
+
+# Response (combined view):
+# {
+#   "dns_records": [
+#     {"record_type": "A", "value": "93.184.216.34", ...},
+#     {"record_type": "MX", "value": "mail.example.com", ...},
+#     ...
+#   ],
+#   "whois_records": {
+#     "registrar": "IANA",
+#     "expiry_date": "2024-08-13T04:00:00Z",
+#     ...
+#   },
+#   "subdomains": [
+#     {"name": "www.example.com", "is_active": true, ...},
+#     {"name": "mail.example.com", "is_active": true, ...},
+#     ...
+#   ]
+# }
+
+# Or get specific result types:
+curl http://localhost:8080/assets/$ASSET_ID/dns        # DNS records only
+curl http://localhost:8080/assets/$ASSET_ID/whois      # WHOIS only
+curl http://localhost:8080/assets/$ASSET_ID/subdomains # Subdomains only
+```
+
+**When to use:**
+
+- `/scan-jobs/{job_id}/results` → Results from a specific scan job
+- `/assets/{id}/results` → **All results ever collected for this asset** 🆕
 
 ---
 
@@ -482,29 +655,81 @@ curl http://localhost:8080/scan-jobs/$JOB_ID
 
 ### Scan Operations (Session 5 - NEW!)
 
-| Method | Endpoint                  | Description              | Status Code  |
-| ------ | ------------------------- | ------------------------ | ------------ |
-| POST   | `/assets/{id}/scan`       | Start scan (async)       | 202 Accepted |
-| GET    | `/assets/{id}/scans`      | List all scans for asset | 200 OK       |
-| GET    | `/scan-jobs/{id}`         | Get scan job status      | 200 OK       |
-| GET    | `/scan-jobs/{id}/results` | Get scan results         | 200 OK       |
+| Method | Endpoint                  | Description              | Query Params                               | Status Code  |
+| ------ | ------------------------- | ------------------------ | ------------------------------------------ | ------------ |
+| POST   | `/assets/{id}/scan`       | Start scan (async)       | -                                          | 202 Accepted |
+| POST   | `/assets/{id}/scan/demo`  | 🎓 Demo: Sync vs Async comparison | -                               | 200 OK       |
+| GET    | `/assets/{id}/scans`      | List all scans for asset | `page`, `page_size`, `scan_type`, `status` | 200 OK       |
+| GET    | `/scan-jobs/{id}`         | Get scan job status      | -                                          | 200 OK       |
+| GET    | `/scan-jobs/{id}/results` | Get scan results         | -                                          | 200 OK       |
+
+**Demo Endpoint (Teaching Tool):**
+- The `/assets/{id}/scan/demo` endpoint runs the same scans twice - once synchronously (sequential) and once asynchronously (concurrent with goroutines)
+- Performance comparison is printed to server console
+- Demonstrates the speed advantage of async I/O operations (typically 2-3x faster)
+- See [test_sync_vs_async.md](test_sync_vs_async.md) for detailed guide
+
+**Pagination & Filtering:**
+
+- `page`: Page number (default: 1)
+- `page_size`: Items per page (default: 20)
+- `scan_type`: Filter by scan type (optional)
+- `status`: Filter by status: `pending`, `running`, `completed`, `failed` (optional)
+
+**Example:** `GET /assets/123/scans?page=1&page_size=10&status=completed`
 
 ### Scan Results by Asset
 
-| Method | Endpoint                  | Description               |
-| ------ | ------------------------- | ------------------------- |
-| GET    | `/assets/{id}/subdomains` | All discovered subdomains |
-| GET    | `/assets/{id}/dns`        | All DNS records           |
-| GET    | `/assets/{id}/whois`      | Latest WHOIS information  |
+| Method | Endpoint                  | Description                                        | Query Params                       |
+| ------ | ------------------------- | -------------------------------------------------- | ---------------------------------- |
+| GET    | `/assets/{id}/results`    | **All scan results** (DNS + WHOIS + Subdomains) 🆕 | -                                  |
+| GET    | `/assets/{id}/dns`        | DNS records only (paginated)                       | `page`, `page_size`, `record_type` |
+| GET    | `/assets/{id}/whois`      | WHOIS information only                             | -                                  |
+| GET    | `/assets/{id}/subdomains` | Discovered subdomains only (paginated)             | `page`, `page_size`                |
+
+**Pagination:**
+
+- All list endpoints support pagination via `page` and `page_size` query parameters
+- Response includes metadata: `total`, `page`, `page_size`, `total_pages`
+
+**Filtering:**
+
+- DNS endpoint: Filter by `record_type` (A, AAAA, MX, NS, TXT, CNAME)
+- Example: `GET /assets/123/dns?page=1&page_size=20&record_type=A`
+
+**Paginated Response Format:**
+
+```json
+{
+  "data": [...],
+  "total": 150,
+  "page": 1,
+  "page_size": 20,
+  "total_pages": 8
+}
+```
+
+**Note:** `/assets/{id}/results` returns combined view of all scan data for the asset, regardless of which scan jobs created them. Perfect for getting complete reconnaissance data in one request. This endpoint returns all data without pagination.
 
 ### Scan Types
 
-- `dns` - DNS record scanning
-- `whois` - WHOIS information
-- `subdomain` - Subdomain enumeration
-- `port` - (Student exercise)
-- `ssl` - (Student exercise)
-- `asn` - (Student exercise)
+**Available Scan Types:**
+
+| Scan Type   | Category   | Description                                               | Time   |
+| ----------- | ---------- | --------------------------------------------------------- | ------ |
+| `all`       | 🔵 Passive | **Run all passive scans** (DNS + WHOIS + Subdomain)       | ~5-10s |
+| `dns`       | 🔵 Passive | DNS record scanning (A, AAAA, MX, NS, TXT, CNAME)         | ~1s    |
+| `whois`     | 🔵 Passive | WHOIS domain registration information                     | ~2s    |
+| `subdomain` | 🔵 Passive | Subdomain enumeration via DNS bruteforce                  | ~3-5s  |
+| `port`      | 🔴 Active  | Port scanning (⚠️ Student exercise - requires permission) | varies |
+| `ssl`       | 🔴 Active  | SSL certificate probing (⚠️ Student exercise)             | varies |
+| `asn`       | 🔵 Passive | ASN and IP range lookup (Student exercise)                | ~1s    |
+
+**Recommended Usage:**
+
+- For comprehensive reconnaissance: Use `"scan_type": "all"`
+- For specific information: Use individual scan types
+- For active scans: Ensure you have written authorization
 
 ---
 

@@ -1,0 +1,28 @@
+# Ignore unnecessary files during Docker build
+.env
+.env.*
+*.log
+.git
+.gitignore
+README.md
+*.md
+.vscode
+.idea
+
+# Test files
+*_test.go
+test/
+tests/
+
+# Build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+main
+bin/
+dist/
+
+# Documentation
+docs/

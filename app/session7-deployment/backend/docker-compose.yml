@@ -1,0 +1,68 @@
+version: "3.8"
+
+# Mini ASM - Session 3: Database Integration
+# This docker-compose file sets up PostgreSQL for local development
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: mini-asm-db
+    restart: unless-stopped
+
+    # Environment variables for PostgreSQL
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: mini_asm
+
+      # Optional: PostgreSQL configuration
+      # POSTGRES_INITDB_ARGS: "-E UTF8"
+      # PGDATA: /var/lib/postgresql/data/pgdata
+
+    # Port mapping: host:container
+    ports:
+      - "5432:5432"
+
+    # Persistent volume for data
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Auto-run migrations on startup (optional)
+      - ./migrations:/docker-entrypoint-initdb.d
+
+    # Health check
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    # Network
+    networks:
+      - mini-asm-network
+
+  # pgAdmin (Optional - Database GUI)
+  # Uncomment to enable web-based database management
+  # pgadmin:
+  #   image: dpage/pgadmin4:latest
+  #   container_name: mini-asm-pgadmin
+  #   restart: unless-stopped
+  #   environment:
+  #     PGADMIN_DEFAULT_EMAIL: admin@admin.com
+  #     PGADMIN_DEFAULT_PASSWORD: admin
+  #   ports:
+  #     - "5050:80"
+  #   networks:
+  #     - mini-asm-network
+  #   depends_on:
+  #     - db
+
+# Volumes for data persistence
+volumes:
+  pgdata:
+    driver: local
+
+# Network for container communication
+networks:
+  mini-asm-network:
+    driver: bridge
