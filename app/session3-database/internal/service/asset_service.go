@@ -8,6 +8,12 @@ import (
 	"github.com/google/uuid"
 )
 
+// CreateAssetInput holds the data needed to create a single asset
+type CreateAssetInput struct {
+	Name string
+	Type string
+}
+
 // AssetService handles business logic for asset operations
 // It sits between handlers (HTTP layer) and storage (data layer)
 type AssetService struct {
@@ -140,6 +146,111 @@ func (s *AssetService) SearchAssets(query string) ([]*model.Asset, error) {
 	}
 
 	return s.storage.Search(query)
+}
+
+// GetStats returns aggregated statistics about all assets
+func (s *AssetService) GetStats() (*model.Stats, error) {
+	return s.storage.GetStats()
+}
+
+// CountAssets returns the count of assets that match the optional filters
+func (s *AssetService) CountAssets(assetType, status string) (int, error) {
+	if assetType != "" && !model.IsValidType(assetType) {
+		return 0, model.ErrInvalidType
+	}
+
+	if status != "" && !model.IsValidStatus(status) {
+		return 0, model.ErrInvalidStatus
+	}
+
+	return s.storage.Count(assetType, status)
+}
+
+// BatchCreateAssets validates and creates multiple assets in one transaction
+func (s *AssetService) BatchCreateAssets(requests []CreateAssetInput) ([]*model.Asset, error) {
+	if len(requests) == 0 {
+		return nil, model.ErrInvalidInput
+	}
+
+	if len(requests) > 100 {
+		return nil, model.ErrTooManyAssets
+	}
+
+	assets := make([]*model.Asset, 0, len(requests))
+	for _, req := range requests {
+		if req.Name == "" {
+			return nil, model.ErrEmptyName
+		}
+		if !model.IsValidType(req.Type) {
+			return nil, model.ErrInvalidType
+		}
+
+		assets = append(assets, &model.Asset{
+			ID:        uuid.New().String(),
+			Name:      req.Name,
+			Type:      req.Type,
+			Status:    model.StatusActive,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		})
+	}
+
+	if err := s.storage.BatchCreate(assets); err != nil {
+		return nil, err
+	}
+
+	return assets, nil
+}
+
+// BatchDeleteAssets removes multiple assets identified by their IDs
+func (s *AssetService) BatchDeleteAssets(ids []string) (deleted int, notFound int, err error) {
+	if len(ids) == 0 {
+		return 0, 0, model.ErrInvalidInput
+	}
+
+	return s.storage.BatchDelete(ids)
+}
+
+// ListAssetsPaginated returns a paginated list of assets with optional filters
+func (s *AssetService) ListAssetsPaginated(page, limit int, assetType, status string) (*model.PagedResult, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	if assetType != "" && !model.IsValidType(assetType) {
+		return nil, model.ErrInvalidType
+	}
+
+	if status != "" && !model.IsValidStatus(status) {
+		return nil, model.ErrInvalidStatus
+	}
+
+	assets, total, err := s.storage.ListPaginated(page, limit, assetType, status)
+	if err != nil {
+		return nil, err
+	}
+
+	if assets == nil {
+		assets = []*model.Asset{}
+	}
+
+	totalPages := (total + limit - 1) / limit
+
+	return &model.PagedResult{
+		Data: assets,
+		Pagination: model.Pagination{
+			Page:       page,
+			Limit:      limit,
+			Total:      total,
+			TotalPages: totalPages,
+		},
+	}, nil
 }
 
 /*

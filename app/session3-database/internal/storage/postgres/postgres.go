@@ -3,6 +3,7 @@ package postgres
 import (
 	"database/sql"
 	"fmt"
+	"log"
 
 	"mini-asm/internal/config"
 	"mini-asm/internal/model"
@@ -248,6 +249,7 @@ func (p *PostgresStorage) Search(query string) ([]*model.Asset, error) {
 		FROM assets
 		WHERE name ILIKE $1
 		ORDER BY created_at DESC
+		LIMIT 100
 	`
 
 	// Add wildcards for partial matching
@@ -281,6 +283,211 @@ func (p *PostgresStorage) Search(query string) ([]*model.Asset, error) {
 	}
 
 	return assets, nil
+}
+
+// GetStats returns aggregated statistics about all assets
+func (p *PostgresStorage) GetStats() (*model.Stats, error) {
+	stats := &model.Stats{
+		ByType:   make(map[string]int),
+		ByStatus: make(map[string]int),
+	}
+
+	// Total count
+	if err := p.db.QueryRow(`SELECT COUNT(*) FROM assets`).Scan(&stats.Total); err != nil {
+		return nil, fmt.Errorf("failed to count assets: %w", err)
+	}
+
+	// Count by type
+	rows, err := p.db.Query(`SELECT type, COUNT(*) FROM assets GROUP BY type`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query stats by type: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var t string
+		var count int
+		if err := rows.Scan(&t, &count); err != nil {
+			return nil, fmt.Errorf("failed to scan type row: %w", err)
+		}
+		stats.ByType[t] = count
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating type rows: %w", err)
+	}
+
+	// Count by status
+	rows2, err := p.db.Query(`SELECT status, COUNT(*) FROM assets GROUP BY status`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query stats by status: %w", err)
+	}
+	defer rows2.Close()
+	for rows2.Next() {
+		var s string
+		var count int
+		if err := rows2.Scan(&s, &count); err != nil {
+			return nil, fmt.Errorf("failed to scan status row: %w", err)
+		}
+		stats.ByStatus[s] = count
+	}
+	if err = rows2.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating status rows: %w", err)
+	}
+
+	return stats, nil
+}
+
+// Count returns the number of assets matching the optional type and status filters
+func (p *PostgresStorage) Count(assetType, status string) (int, error) {
+	query := `SELECT COUNT(*) FROM assets WHERE 1=1`
+	var args []interface{}
+	argCount := 1
+
+	if assetType != "" {
+		query += fmt.Sprintf(" AND type = $%d", argCount)
+		args = append(args, assetType)
+		argCount++
+	}
+
+	if status != "" {
+		query += fmt.Sprintf(" AND status = $%d", argCount)
+		args = append(args, status)
+	}
+
+	var count int
+	if err := p.db.QueryRow(query, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("failed to count assets: %w", err)
+	}
+
+	return count, nil
+}
+
+// BatchCreate inserts multiple assets in a single transaction (all-or-nothing)
+func (p *PostgresStorage) BatchCreate(assets []*model.Asset) error {
+	tx, err := p.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() {
+		if rbErr := tx.Rollback(); rbErr != nil && rbErr.Error() != "sql: transaction has already been committed or rolled back" {
+			log.Printf("warning: transaction rollback error: %v", rbErr)
+		}
+	}()
+
+	stmt, err := tx.Prepare(`
+		INSERT INTO assets (id, name, type, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, asset := range assets {
+		if _, err := stmt.Exec(
+			asset.ID,
+			asset.Name,
+			asset.Type,
+			asset.Status,
+			asset.CreatedAt,
+			asset.UpdatedAt,
+		); err != nil {
+			return fmt.Errorf("failed to insert asset %q: %w", asset.Name, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+// BatchDelete removes assets by IDs; IDs that don't exist are silently skipped.
+// Returns the count of deleted assets and the count of IDs not found.
+func (p *PostgresStorage) BatchDelete(ids []string) (deleted int, notFound int, err error) {
+	if len(ids) == 0 {
+		return 0, 0, nil
+	}
+
+	for _, id := range ids {
+		result, execErr := p.db.Exec(`DELETE FROM assets WHERE id = $1`, id)
+		if execErr != nil {
+			return deleted, notFound, fmt.Errorf("failed to delete asset %q: %w", id, execErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil {
+			return deleted, notFound, fmt.Errorf("failed to get affected rows for asset %q: %w", id, rowsErr)
+		}
+		if rows == 0 {
+			notFound++
+		} else {
+			deleted++
+		}
+	}
+
+	return deleted, notFound, nil
+}
+
+// ListPaginated retrieves a page of assets with optional type/status filters.
+// Returns the matching assets, the total count of matching assets, and any error.
+func (p *PostgresStorage) ListPaginated(page, limit int, assetType, status string) ([]*model.Asset, int, error) {
+	where := " WHERE 1=1"
+	var args []interface{}
+	argCount := 1
+
+	if assetType != "" {
+		where += fmt.Sprintf(" AND type = $%d", argCount)
+		args = append(args, assetType)
+		argCount++
+	}
+
+	if status != "" {
+		where += fmt.Sprintf(" AND status = $%d", argCount)
+		args = append(args, status)
+		argCount++
+	}
+
+	// Total matching count
+	var total int
+	if err := p.db.QueryRow("SELECT COUNT(*) FROM assets"+where, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("failed to count assets: %w", err)
+	}
+
+	// Paginated rows
+	offset := (page - 1) * limit
+	dataArgs := append(args, limit, offset)
+	query := fmt.Sprintf(
+		"SELECT id, name, type, status, created_at, updated_at FROM assets%s ORDER BY created_at DESC LIMIT $%d OFFSET $%d",
+		where, argCount, argCount+1,
+	)
+
+	rows, err := p.db.Query(query, dataArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list assets: %w", err)
+	}
+	defer rows.Close()
+
+	var assets []*model.Asset
+	for rows.Next() {
+		asset := &model.Asset{}
+		if err := rows.Scan(
+			&asset.ID,
+			&asset.Name,
+			&asset.Type,
+			&asset.Status,
+			&asset.CreatedAt,
+			&asset.UpdatedAt,
+		); err != nil {
+			return nil, 0, fmt.Errorf("failed to scan asset: %w", err)
+		}
+		assets = append(assets, asset)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("error iterating rows: %w", err)
+	}
+
+	return assets, total, nil
 }
 
 /*
